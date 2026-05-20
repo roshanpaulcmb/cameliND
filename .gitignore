@@ -5,7 +5,7 @@ slurm/
 workbench/
 
 # archive
-yamls/nanobody_scaffolds/archive/
+archive/
 
 # artifacts
 .DS_Store
