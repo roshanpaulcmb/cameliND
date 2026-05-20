@@ -1,0 +1,20 @@
+entities:
+  # target protein, omicron spike
+  - file:
+      path: 8DM9rbd.cif
+
+      # Which chain and residues in the .cif file to use as target
+      include:
+        - chain:
+            id: A
+
+      binding_types:
+        - chain:
+            id: A
+            binding: "all"
+
+
+  # nanobody scaffolds
+  - file:
+      path: 
+        - ../nanobody_scaffolds/7WHJ_nbD.yaml

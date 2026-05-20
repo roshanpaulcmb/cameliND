@@ -1,0 +1,11 @@
+# Bn03_nano1 chain D from 7WHJ
+
+path: 7WHJ.cif
+include:
+  - chain:
+      id: D
+
+design:
+  - chain:
+      id: D
+      res_index: 31..35,50..66,97..108 # https://www.biorxiv.org/content/10.1101/2025.05.06.652338v1.full.pdf

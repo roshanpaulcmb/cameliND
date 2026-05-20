@@ -1,0 +1,18 @@
+# design specification file
+# cropping 8DM9 to only include the region binding domain (RBD) to ACE2 receptor
+
+entities:
+  - file:
+      path: 8DM9.cif
+      include:
+        - chain:
+            id: A
+            res_index: 338..516 # RBD
+      binding_types:
+        - chain:
+            id: A
+            not_binding: 338..371,376..400,410..413,423..435,461..468,509..516 # >15 A from ACE2
+
+  - file:
+      path:
+        - ../nanobody_scaffolds/7WHJ_nbD.yaml

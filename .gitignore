@@ -1,0 +1,12 @@
+# SLURM
+slurm/
+
+# workbench
+workbench/
+
+# archive
+yamls/nanobody_scaffolds/archive/
+
+# artifacts
+.DS_Store
+.ipynb_checkpoints/
