@@ -17,7 +17,7 @@ eval "$(conda shell.bash hook)"
 conda activate boltzgen
 
 boltzgen run yamls/8DM9/8DM9_new.yaml \
-	--output workbench/8DM9/run_${SLURM_ARRAY_TASK_ID} \
+	--output workbench/8DM9_1/run_${SLURM_ARRAY_TASK_ID} \
 	--protocol nanobody-anything \
 	--num_designs 1000 \
 	--reuse \
