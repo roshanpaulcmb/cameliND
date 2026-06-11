@@ -108,7 +108,7 @@ class model:
                        mainForcefield='amber19-all.xml',
                        waterForcefield='amber19/tip3pfb.xml',
                        stepsize=2*femtoseconds,
-                       padding=10.0*nanometer,
+                       padding=1.0*nanometer,
                        boxShape='octahedron',
                        temperature=310*kelvin,
                        pressure=1*atmospheres,
@@ -506,7 +506,7 @@ def buildParser():
                       help="Resume production from --dir toward a NEW larger --steps target")
     parser.add_argument("--pdb", help="Input PDB or CIF file (receptor+ligand); required unless --restart/--extend")
     parser.add_argument("--write_fixed", action="store_true", help="Write the fixed structure to disk")
-    parser.add_argument("--padding", type=float, default=10.0, help="Water box padding in nm")
+    parser.add_argument("--padding", type=float, default=1.0, help="Water box padding in nm")
     parser.add_argument("--box_shape", type=str, default="octahedron", help="Water box shape")
     parser.add_argument("--temperature", type=float, default=310, help="Temperature for simulation in Kelvin")
     parser.add_argument("--etimeNVT", type=int, default=100, help="Picoseconds spent in NVT warm-up")
