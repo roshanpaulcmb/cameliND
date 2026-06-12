@@ -1,0 +1,16 @@
+name: cameliND
+channels:
+  - conda-forge
+dependencies:
+  - hdbscan
+  - jupyter
+  - matplotlib
+  - mdanalysis
+  - numpy
+  - openmm
+  - pandas
+  - pdbfixer
+  - python
+  - scikit-learn
+  - scipy
+  - umap-learn
