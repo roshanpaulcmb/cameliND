@@ -29,4 +29,4 @@ echo "Simulating ${RANK}: ${CIF}"
 # creates it and writes every artifact inside it.
 OUT="simulation/8DM9_1/${RANK}/run1"
 
-python src/simulate.py --pdb "${CIF}" --dir "${OUT}"
+python -m cameliND simulate --pdb "${CIF}" --dir "${OUT}"

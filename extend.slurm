@@ -27,4 +27,4 @@ DIR="${1:?usage: sbatch extend.slurm <run_dir> <new_total_steps>}"
 STEPS="${2:?usage: sbatch extend.slurm <run_dir> <new_total_steps>}"
 echo "Extending ${DIR} to ${STEPS} steps"
 
-python src/simulate.py --extend --dir "${DIR}" --steps "${STEPS}"
+python -m cameliND extend --dir "${DIR}" --steps "${STEPS}"

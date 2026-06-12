@@ -26,4 +26,4 @@ set -euo pipefail
 DIR="${1:?usage: sbatch restart.slurm <run_dir>}"
 echo "Restarting ${DIR}"
 
-python src/simulate.py --dir "${DIR}" --restart
+python -m cameliND restart --dir "${DIR}"
