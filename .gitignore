@@ -1,8 +1,10 @@
 # SLURM
 slurm/
 
-# workbench
+# data
 workbench/
+simulation/
+*.dcd
 
 # archive
 archive/

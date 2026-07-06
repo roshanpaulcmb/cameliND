@@ -33,8 +33,10 @@ import time
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt   # backend left to matplotlib: inline in Jupyter, Agg when headless
 import MDAnalysis as mda
 from MDAnalysis.analysis import rms, contacts, distances
+from MDAnalysis.analysis.align import AlignTraj   # imported directly: `align` is a method name below
 from MDAnalysis.exceptions import NoDataError
 from scipy.ndimage import gaussian_filter
 from scipy.spatial.distance import cdist
@@ -66,14 +68,7 @@ class analyze:
 
         logger.info("Making universe..")
         self.u = mda.Universe(topology, trajectory)
-        self.protein = self.u.select_atoms("protein")
-
-        # Per-chain heavy-atom groups, keyed by chain id: self.chain["A"], etc.
-        # The binding analyses take two chain ids and look their groups up here.
-        self.chainKey, chains = self._detectChains()
-        self.chain = {c: self.u.select_atoms(f"protein and {self.chainKey} {c} and not name H*")
-                      for c in chains}
-        logger.info("Chains: %s", list(self.chain))
+        self._refreshSelections()
 
         # populated by the analysis methods
         self.rmsdFirst = None
@@ -111,6 +106,74 @@ class analyze:
         if chainId not in self.chain:
             raise ValueError(f"Chain {chainId!r} not found; available chains: {list(self.chain)}")
         return self.chain[chainId]
+
+    def _refreshSelections(self):
+        '''(Re)build self.protein and the per-chain heavy-atom groups from self.u.
+
+        Per-chain heavy-atom groups are keyed by chain id (self.chain["A"], etc.);
+        the binding analyses take two chain ids and look their groups up here.
+        Called by __init__ and after downsize()/align() swap the trajectory.'''
+        self.protein = self.u.select_atoms("protein")
+        self.chainKey, chains = self._detectChains()
+        self.chain = {c: self.u.select_atoms(f"protein and {self.chainKey} {c} and not name H*")
+                      for c in chains}
+        logger.info("Chains: %s", list(self.chain))
+
+    #### TRAJECTORY PREP ####
+
+    def downsize(self, percentage=10, write=True):
+        '''Keep every Nth frame (0, N, 2N, ...) with N = round(100/percentage),
+        reducing the trajectory to ~percentage% of its frames. The whole system is
+        kept (no atom subset), so the original topology still matches.
+
+        write=True (default) writes {outputName}_downsampled{percentage}.dcd and
+        reloads from it; write=False subsamples into memory. Either way self.u and
+        the selections are rebuilt. Returns self.'''
+        step = max(1, round(100 / percentage))
+        nBefore = len(self.u.trajectory)
+        logger.info("Downsizing to %d%% (every %d frames) from %d frames..",
+                    percentage, step, nBefore)
+
+        if write:
+            out = f"{self.outputName}_downsampled{percentage}.dcd"
+            with mda.Writer(out, self.u.atoms.n_atoms) as w:
+                for _ in self.u.trajectory[::step]:
+                    w.write(self.u.atoms)
+            self.trajectory = out
+            self.u = mda.Universe(self.topology, out)
+        else:
+            self.u.transfer_to_memory(step=step)
+
+        self._refreshSelections()
+        logger.info(" Downsized: %d -> %d frames", nBefore, len(self.u.trajectory))
+        return self
+
+    def align(self, refFrame=0, select="backbone", chain=None, write=True):
+        '''Superpose the trajectory onto a reference frame to remove rigid-body
+        drift. Defaults to all-protein backbone against frame 0; pass a chain id to
+        align on a single chain's backbone (e.g. hold the receptor fixed).
+
+        write=True (default) writes {outputName}_aligned.dcd and reloads from it;
+        write=False aligns in memory. Either way self.u and the selections are
+        rebuilt. Returns self.'''
+        if chain is not None:
+            self._group(chain)   # validates the chain id
+            select = f"{select} and {self.chainKey} {chain}"
+        logger.info("Aligning on '%s' to frame %d..", select, refFrame)
+
+        if write:
+            out = f"{self.outputName}_aligned.dcd"
+            AlignTraj(self.u, self.u, select=select, ref_frame=refFrame,
+                      filename=out).run(verbose=self.verbose)
+            self.trajectory = out
+            self.u = mda.Universe(self.topology, out)
+        else:
+            self.u.transfer_to_memory()
+            AlignTraj(self.u, self.u, select=select, ref_frame=refFrame,
+                      in_memory=True).run(verbose=self.verbose)
+
+        self._refreshSelections()
+        return self
 
     #### WHOLE-PROTEIN ANALYSES ####
 
@@ -160,17 +223,30 @@ class analyze:
                     self.pc.shape[0], self.pc.shape[1])
         return self
 
+    @staticmethod
+    def _freeEnergy(states, T, kB, sigma):
+        '''ΔF (kcal/mol) from a 2D histogram of state counts. The density is smoothed
+        first, then converted with -kT ln(p): this spreads counts into neighbouring
+        bins (forming real basins) and avoids flattening. Sign convention: the
+        most-populated state sits at ΔF = 0 and everything else is negative, so
+        high-probability basins read high (yellow) against a low (purple) background.'''
+        density = gaussian_filter(states, sigma=sigma)
+        prob = density / density.sum()
+        with np.errstate(divide="ignore"):
+            F = -kB * T * np.log(prob)            # J/molecule; empty bins -> +inf
+        F *= 6.02214076E23 / 4184.0               # J/molecule -> kcal/mol
+        finite = np.isfinite(F)
+        F[~finite] = F[finite].max()              # bound unvisited bins at highest sampled energy
+        return F.min() - F                        # ΔF in [negative, 0]: wells at 0, rest negative
+
     def calcSfe(self, components=(0, 1), bins=200, sigma=2, T=310, kB=1.380649E-23):
-        '''Free-energy surface over two principal components (smoothed).
-        Stores self.sfePca. T in Kelvin (recommended); kB in J/K.'''
+        '''Free-energy surface (kcal/mol) over two principal components, smoothed.
+        Stores self.sfePca. T in Kelvin; kB in J/K.'''
         logger.info("Calculating surface free energy..")
 
         states, xedges, yedges = np.histogram2d(self.pc[:, components[0]],
                                                 self.pc[:, components[1]], bins=bins)
-        prob = states / np.sum(states)
-        F = -kB * T * np.log(prob, where=(prob > 0))
-        deltaF = F - np.nanmin(F)
-        self.sfePca = gaussian_filter(deltaF, sigma=sigma)
+        self.sfePca = self._freeEnergy(states, T, kB, sigma)
         return self
 
     def runUmap(self, n_neighbors=90, min_dist=0.6, n_components=3,
@@ -192,16 +268,13 @@ class analyze:
         return self
 
     def runUmapSfe(self, components=(0, 1), bins=200, sigma=2, T=310, kB=1.380649E-23):
-        '''Free-energy surface over two UMAP dimensions. Stores self.sfeUmap.
-        T in Kelvin (recommended); kB in J/K.'''
+        '''Free-energy surface (kcal/mol) over two UMAP dimensions, smoothed.
+        Stores self.sfeUmap. T in Kelvin; kB in J/K.'''
         logger.info("Running UMAP SFE..")
 
         states, xedges, yedges = np.histogram2d(self.umap[:, components[0]],
                                                 self.umap[:, components[1]], bins=bins)
-        prob = states / np.sum(states)
-        F = -kB * T * np.log(prob, where=(prob > 0))
-        deltaF = F - np.nanmin(F)
-        self.sfeUmap = gaussian_filter(deltaF, sigma=sigma)
+        self.sfeUmap = self._freeEnergy(states, T, kB, sigma)
         return self
 
     def clusterUmap(self, min_cluster_size=500, min_samples=1,
@@ -218,8 +291,11 @@ class analyze:
 
         # Assign noise points (-1) to nearest cluster
         noise_idx = np.where(labels == -1)[0]
-        if len(noise_idx) > 0:
-            unique_labels = np.unique(labels[labels != -1])
+        unique_labels = np.unique(labels[labels != -1])
+        if len(unique_labels) == 0:
+            logger.warning("No clusters found (min_cluster_size=%d too large for %d points); "
+                           "all points left as noise", min_cluster_size, len(labels))
+        elif len(noise_idx) > 0:
             centroids = np.array([self.umap[labels == lbl].mean(axis=0) for lbl in unique_labels])
             for i in noise_idx:
                 nearest = np.argmin(cdist([self.umap[i]], centroids))
@@ -374,10 +450,122 @@ class analyze:
                            list(self.chain))
         return self
 
-    def plot(self, kind):
-        '''Render a stored result. Reserved single plotting entry point; plotting
-        is deliberately separate from the analysis methods (results live on self).'''
-        raise NotImplementedError("plot() is not implemented yet")
+    #### PLOTTING ####
+
+    def _require(self, value, method):
+        '''Guard: a plotter's result must exist or we name the method to run.'''
+        if value is None:
+            raise ValueError(f"Nothing to plot; run {method} first")
+
+    def _heatmap(self, mat, title, xlabel, ylabel, cmap, cbar, **kw):
+        '''Shared 2D-matrix figure (free-energy surfaces, distance/contact maps).'''
+        fig, ax = plt.subplots()
+        im = ax.imshow(mat, origin="lower", aspect="auto", cmap=cmap, **kw)
+        fig.colorbar(im, ax=ax, label=cbar)
+        ax.set(title=title, xlabel=xlabel, ylabel=ylabel)
+        return fig, ax
+
+    def _plotRmsd(self):
+        self._require(self.rmsdFirst, "calcRmsd()")
+        fig, ax = plt.subplots()
+        ax.plot(self.rmsdFirst[1], self.rmsdFirst[2], label="vs first frame")
+        ax.plot(self.rmsdLast[1], self.rmsdLast[2], label="vs last frame")
+        ax.set(xlabel="Time (ps)", ylabel="RMSD (Å)", title="Backbone RMSD")
+        ax.legend()
+        return fig, ax
+
+    def _plotRmsf(self):
+        self._require(self.rmsf, "calcRmsf()")
+        fig, ax = plt.subplots()
+        # Plot against a continuous CA index, not resids: residue numbering resets
+        # per chain, so resids are non-monotonic and would draw a line across the break.
+        ax.plot(np.arange(len(self.rmsf)), self.rmsf)
+        ax.set(xlabel="Residue (CA index)", ylabel="RMSF (Å)", title="Per-residue RMSF")
+        return fig, ax
+
+    def _plotSfePca(self):
+        self._require(self.sfePca, "calcSfe()")
+        return self._heatmap(self.sfePca.T, "PCA free-energy surface",
+                             "PC1", "PC2", "viridis", "ΔF (kcal/mol)")
+
+    def _plotSfeUmap(self):
+        self._require(self.sfeUmap, "runUmapSfe()")
+        return self._heatmap(self.sfeUmap.T, "UMAP free-energy surface",
+                             "UMAP1", "UMAP2", "viridis", "ΔF (kcal/mol)")
+
+    def _plotUmap(self):
+        self._require(self.umap, "runUmap()")
+        fig, ax = plt.subplots()
+        sc = ax.scatter(self.umap[:, 0], self.umap[:, 1],
+                        c=self.cluster, cmap="tab10", s=5)
+        if self.cluster is not None:
+            fig.colorbar(sc, ax=ax, label="cluster")
+        ax.set(xlabel="UMAP1", ylabel="UMAP2", title="UMAP embedding")
+        return fig, ax
+
+    def _plotContacts(self):
+        self._require(self.contacts, "findContacts()")
+        fig, ax = plt.subplots()
+        ax.plot(self.contacts["Frame"], self.contacts["Contacts"])
+        ax.set(xlabel="Frame", ylabel="Fraction native contacts",
+               title="Native contacts")
+        return fig, ax
+
+    def _plotDistance(self):
+        self._require(self.distance, "findDist()")
+        return self._heatmap(self.distance, "Mean residue–residue distance",
+                             "chain0 residue", "chain1 residue", "viridis_r", "Distance (Å)")
+
+    def _plotContactFreq(self):
+        self._require(self.contactFreq, "findContacts2()")
+        return self._heatmap(self.contactFreq, "Contact frequency",
+                             "chain0 residue", "chain1 residue", "magma", "Contact frequency")
+
+    def _plotResCor(self):
+        self._require(self.resCor, "findResCor()")
+        vmax = np.abs(self.resCor).max() or 1
+        return self._heatmap(self.resCor, "Inter-chain CA correlation",
+                             "chain0 residue", "chain1 residue", "bwr", "Correlation",
+                             vmin=-vmax, vmax=vmax)
+
+    def plot(self, kind, write=False, show=True):
+        '''Render a stored result: display it (show=True) and/or write
+        {outputName}{kind}.png (write=True); returns (fig, ax). Plotting is
+        deliberately separate from the analysis methods (results live on self), so
+        the matching method must have run first -- otherwise the error names it.
+        Valid kinds are the keys below.'''
+        plotters = {
+            "rmsd": self._plotRmsd,
+            "rmsf": self._plotRmsf,
+            "sfe": self._plotSfePca,
+            "sfeUmap": self._plotSfeUmap,
+            "umap": self._plotUmap,
+            "contacts": self._plotContacts,
+            "distance": self._plotDistance,
+            "contactFreq": self._plotContactFreq,
+            "resCor": self._plotResCor,
+        }
+        if kind not in plotters:
+            raise ValueError(f"Unknown plot {kind!r}; choose from {list(plotters)}")
+        fig, ax = plotters[kind]()
+        if write:
+            fname = f"{self.outputName}{kind}.png"
+            fig.savefig(fname, dpi=150, bbox_inches="tight")
+            logger.info("Wrote %s", fname)
+        if show:
+            plt.show()
+        return fig, ax
+
+    def plotAll(self, write=False, show=True):
+        '''Plot every result computed so far, skipping the ones still None.'''
+        available = {"rmsd": self.rmsdFirst, "rmsf": self.rmsf, "sfe": self.sfePca,
+                     "sfeUmap": self.sfeUmap, "umap": self.umap, "contacts": self.contacts,
+                     "distance": self.distance, "contactFreq": self.contactFreq,
+                     "resCor": self.resCor}
+        for kind, result in available.items():
+            if result is not None:
+                self.plot(kind, write=write, show=show)
+        return self
 
 
 #### CLI ####
