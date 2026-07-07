@@ -110,7 +110,7 @@ There are two ways to get an `analyze` object:
    the simulation you just ran, in place:
 
    ```python
-   s.analyze.findResCor("A", "B")
+   s.analyze.resCor("A", "B")
    ```
 
 2. **From files directly** — `analyze` is file-based, so you can point it at any topology
@@ -118,25 +118,34 @@ There are two ways to get an `analyze` object:
 
    ```python
    a = cam.analyze("model.pdb", "trajectory.dcd")
-   a.findResCor("A", "B")
+   a.resCor("A", "B")
    ```
 
 Either way you get the same `analyze` object with the same methods.
 
-Each method computes and stores its result on the object (e.g. `a.bindingScore`,
-`a.resCor`, `a.pc`). They fall into three groups:
+Methods are lowerCamelCase verbs; each computes and stores its result on the object as
+the same name in UpperCamelCase (e.g. `resCor()` → `a.ResCor`, `pca()` → `a.Pc`, the
+binding score in `a.BindingScore`). They fall into four groups:
 
-- **Structural stability** — `calcRmsd()` (deviation from the reference over time) and
-  `calcRmsf()` (per-residue flexibility).
-- **Conformational landscape** — `runPca()` (principal motions), `calcSfe()` (free-energy
-  surface over the top components), `runUmap()` / `runUmapSfe()` (nonlinear embedding) and
+- **Trajectory prep** (optional, run first) — `downsize()` keeps every Nth frame to
+  thin a long trajectory; `align()` superposes every frame onto a reference to remove
+  rigid-body drift. Both rebuild the universe in place and return `self`, so they chain
+  (`a.downsize().align(chain="A")`); by default each writes the reduced/aligned DCD next to
+  the input (`write=False` does it in memory instead).
+- **Structural stability** — `rmsd()` (deviation from the reference over time) and
+  `rmsf()` (per-residue flexibility).
+- **Conformational landscape** — `pca()` (principal motions), `sfe()` (free-energy
+  surface over the top components), `umap()` / `umapSfe()` (nonlinear embedding) and
   `clusterUmap()` (HDBSCAN clustering of conformational states).
-- **Binding (receptor ↔ nanobody)** — `findContacts()`, `findDist()`, `findContacts2()`
-  (inter-chain contact and distance maps), and `findResCor()`, the binding-score
+- **Binding (receptor ↔ nanobody)** — `contacts()`, `dist()`, `contacts2()`
+  (inter-chain contact and distance maps), and `resCor()`, the binding-score
   centerpiece: it measures normalized inter-chain Cα displacement correlation (attraction
-  within 8 Å, repulsion within 13 Å) and yields `a.bindingScore`.
+  within 8 Å, repulsion within 13 Å). In a single pass it accumulates the score as a
+  cumulative function of time — `a.BindingSeries` (with `a.AttractionSeries` /
+  `a.RepulsionSeries`) against `a.BindingTime` — and the full-trajectory scalar
+  `a.BindingScore` is just the last point of that curve.
 
-Binding analyses take the two chain IDs to compare, e.g. `a.findResCor("A", "B")`
+Binding analyses take the two chain IDs to compare, e.g. `a.resCor("A", "B")`
 (receptor = A, nanobody = B).
 
 ### `analyze()` inputs
@@ -154,17 +163,38 @@ Every tunable value in a method is a keyword argument:
 
 | Method | Key arguments (defaults) |
 |---|---|
-| `calcRmsd` / `calcRmsf` / `runPca` | `select="name CA"` |
-| `calcSfe` | `components=(0, 1)`, `bins=200`, `sigma=2`, `T=310`, `kB=1.380649e-23` |
-| `runUmap` | `n_neighbors=90`, `min_dist=0.6`, `n_components=3`, `n_pcs=10`, `metric="euclidean"`, `random_state=42` |
-| `runUmapSfe` | `components=(0, 1)`, `bins=200`, `sigma=2`, `T=310`, `kB=1.380649e-23` |
+| `downsize` | `percentage=10`, `write=True` |
+| `align` | `refFrame=0`, `select="backbone"`, `chain=None`, `write=True` |
+| `rmsd` / `rmsf` / `pca` | `select="name CA"` |
+| `sfe` | `components=(0, 1)`, `bins=200`, `sigma=2`, `T=310`, `kB=1.380649e-23` |
+| `umap` | `n_neighbors=90`, `min_dist=0.6`, `n_components=3`, `n_pcs=10`, `metric="euclidean"`, `random_state=42` |
+| `umapSfe` | `components=(0, 1)`, `bins=200`, `sigma=2`, `T=310`, `kB=1.380649e-23` |
 | `clusterUmap` | `min_cluster_size=500`, `min_samples=1`, `cluster_selection_epsilon=0.01` |
-| `findContacts` | `chain0`, `chain1`, `cutoff=4.5`, `method="radius_cut"` |
-| `findDist` / `findContacts2` | `chain0`, `chain1`, `cutoff=4.5` |
-| `findResCor` | `chain0`, `chain1`, `attractiveCutoff=8`, `repulsiveCutoff=13` |
+| `contacts` | `chain0`, `chain1`, `cutoff=4.5`, `method="radius_cut"` |
+| `dist` / `contacts2` | `chain0`, `chain1`, `cutoff=4.5` |
+| `resCor` | `chain0`, `chain1`, `attractiveCutoff=8`, `repulsiveCutoff=13`, `stride=1`, `minFrames=10` |
 
-`runAll(chain0=None, chain1=None)` runs the whole suite in dependency order; pass the two
+`all(chain0=None, chain1=None)` runs the whole suite in dependency order; pass the two
 chain IDs to include the binding analyses. (`T` in Kelvin, `kB` in J/K.)
+
+### Plotting
+
+Plotting is kept separate from the analyses — the methods only compute and store, so a
+result must exist before it can be drawn (otherwise the error names the method to run).
+`plot(kind, write=False, show=True)` renders one stored result and returns its
+`(fig, ax)`; `plotAll(write=False, show=True)` draws every result computed so far,
+skipping the ones not yet run. `write=True` saves `{outputName}{kind}.png`. Valid kinds:
+
+| `kind` | Needs | Shows |
+|---|---|---|
+| `rmsd` | `rmsd()` | RMSD vs first/last frame over time |
+| `rmsf` | `rmsf()` | per-residue flexibility |
+| `sfe` / `sfeUmap` | `sfe()` / `umapSfe()` | free-energy surface (PCA / UMAP) |
+| `umap` | `umap()` (+ `clusterUmap()`) | UMAP embedding, colored by cluster |
+| `contacts` | `contacts()` | native-contact fraction over time |
+| `distance` / `contactFreq` | `dist()` / `contacts2()` | inter-chain distance / contact-frequency map |
+| `resCor` | `resCor()` | inter-chain Cα correlation matrix |
+| `bindingScore` | `resCor()` | attraction/repulsion/binding score vs time |
 
 ## Command line
 

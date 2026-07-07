@@ -67,72 +67,72 @@ class simulate:
                        steps=50000000,            # 100 ns at a 2 fs stepsize
                        logInterval=5000,          # text state log every 10 ps
                        interval=50000):           # trajectory frame AND state.xml every 100 ps
-        # All run artifacts live under self.directory with fixed names. The
+        # All run artifacts live under self.Directory with fixed names. The
         # directory fully describes a run, so restart() needs only this path.
-        self.directory = directory
+        self.Directory = directory
         os.makedirs(directory, exist_ok=True)
         join = os.path.join
-        self.params_json  = join(directory, 'params.json')    # restart manifest + record
-        self.system_xml   = join(directory, 'system.xml')     # serialized production System
-        self.solvated_pdb = join(directory, 'solvated.pdb')   # full (solvated) topology for restart
-        self.state_xml    = join(directory, 'state.xml')      # rolling saveState (restart point)
-        self.model_pdb    = join(directory, 'model.pdb')      # protein-only topology (analysis)
-        self.trajectory   = join(directory, 'trajectory.dcd')   # production (protein-only)
-        self.etrajectory  = join(directory, 'etrajectory.dcd')  # equilibration (protein-only)
-        self.eenergy      = join(directory, 'eenergy.csv')      # NPT equilibration energy trace
-        self.info         = join(directory, 'production.log')   # production state log
-        self.einfo        = join(directory, 'equilibration.log')  # equilibration state log
+        self.ParamsJson  = join(directory, 'params.json')    # restart manifest + record
+        self.SystemXml   = join(directory, 'system.xml')     # serialized production System
+        self.SolvatedPdb = join(directory, 'solvated.pdb')   # full (solvated) topology for restart
+        self.StateXml    = join(directory, 'state.xml')      # rolling saveState (restart point)
+        self.ModelPdb    = join(directory, 'model.pdb')      # protein-only topology (analysis)
+        self.Trajectory   = join(directory, 'trajectory.dcd')   # production (protein-only)
+        self.Etrajectory  = join(directory, 'etrajectory.dcd')  # equilibration (protein-only)
+        self.Eenergy      = join(directory, 'eenergy.csv')      # NPT equilibration energy trace
+        self.Info         = join(directory, 'production.log')   # production state log
+        self.Einfo        = join(directory, 'equilibration.log')  # equilibration state log
 
         # prepare()
-        self.pdbFile = pdbFile
-        self.write = write
+        self.PdbFile = pdbFile
+        self.Write = write
 
         # setup()
-        self.mainForcefield = mainForcefield
-        self.waterForcefield = waterForcefield
-        self.stepsize = stepsize
-        self.integrator = openmm.VerletIntegrator(self.stepsize)
+        self.MainForcefield = mainForcefield
+        self.WaterForcefield = waterForcefield
+        self.Stepsize = stepsize
+        self.Integrator = openmm.VerletIntegrator(self.Stepsize)
 
         # minimize()
-        self.padding = padding
-        self.boxShape = boxShape
+        self.Padding = padding
+        self.BoxShape = boxShape
 
         # equilibrate()
-        self.temperature = temperature
-        self.pressure = pressure
-        self.nonbondedMethod = nonbondedMethod
-        self.nonbondedCutoff = nonbondedCutoff
-        self.constraints = constraints
-        self.friction = friction
+        self.Temperature = temperature
+        self.Pressure = pressure
+        self.NonbondedMethod = nonbondedMethod
+        self.NonbondedCutoff = nonbondedCutoff
+        self.Constraints = constraints
+        self.Friction = friction
         
         ## NVT
-        self.etimeNVT = etimeNVT
-        self.estepNVT = estepNVT
+        self.EtimeNVT = etimeNVT
+        self.EstepNVT = estepNVT
         
         ## NPT
-        self.etimeNPT = etimeNPT
-        self.estepNPT = estepNPT
+        self.EtimeNPT = etimeNPT
+        self.EstepNPT = estepNPT
         
         ## NPT loop
-        self.plateauTolerance = plateauTolerance
-        self.sampleInterval = sampleInterval
-        self.smoothFraction = smoothFraction
-        self.maxEquilChunks = maxEquilChunks
+        self.PlateauTolerance = plateauTolerance
+        self.SampleInterval = sampleInterval
+        self.SmoothFraction = smoothFraction
+        self.MaxEquilChunks = maxEquilChunks
 
         # run()
-        self.steps = steps
-        self.logInterval = logInterval
-        self.interval = interval
+        self.Steps = steps
+        self.LogInterval = logInterval
+        self.Interval = interval
 
         # populated as the pipeline runs
-        self.fixer = None
-        self.file = None
-        self.modeller = None
-        self.forcefield = None
-        self.system = None
-        self.simulation = None
-        self.subsetTopology = None   # protein-only topology, shared by both trajectories
-        self.subsetIndices = None
+        self.Fixer = None
+        self.File = None
+        self.Modeller = None
+        self.Forcefield = None
+        self.System = None
+        self.Simulation = None
+        self.SubsetTopology = None   # protein-only topology, shared by both trajectories
+        self.SubsetIndices = None
 
         # lazily built on first access to self.analyze (run.analyze.<method>); the
         # import is deferred so a sim-only job never loads MDAnalysis.
@@ -142,153 +142,153 @@ class simulate:
     def analyze(self):
         '''`analyze` handle bound to this run's model.pdb + trajectory.dcd, so a finished
         run can be analyzed in place with the same verb as the class:
-        `sim.analyze.findResCor("A", "B")`. Equivalent to
-        `cam.analyze(sim.model_pdb, sim.trajectory)`. The import is deferred (handle built
+        `sim.analyze.resCor("A", "B")`. Equivalent to
+        `cam.analyze(sim.ModelPdb, sim.Trajectory)`. The import is deferred (handle built
         on first access), so a sim-only process never loads MDAnalysis -- touch it only once
         the run has frames.'''
         if self._analyze is None:
             from ._analyze import analyze
-            self._analyze = analyze(self.model_pdb, self.trajectory,
-                                    outputName=self.directory)
+            self._analyze = analyze(self.ModelPdb, self.Trajectory,
+                                    outputName=self.Directory)
         return self._analyze
 
     def prepare(self):
-        '''Load and fix self.pdbFile (missing residues/atoms/hydrogens at pH 7).
-        Stores self.fixer always; writes the fixed structure to disk only if self.write=True.'''
-        base, ext = os.path.splitext(self.pdbFile)
+        '''Load and fix self.PdbFile (missing residues/atoms/hydrogens at pH 7).
+        Stores self.Fixer always; writes the fixed structure to disk only if self.Write=True.'''
+        base, ext = os.path.splitext(self.PdbFile)
         ext = ext.lower()
         if ext not in ('.pdb', '.cif'):
             raise ValueError(f"Unsupported file extension: {ext}")
 
-        logger.info(f"Fixing {self.pdbFile}..")
-        fixer = PDBFixer(filename=self.pdbFile)
+        logger.info(f"Fixing {self.PdbFile}..")
+        fixer = PDBFixer(filename=self.PdbFile)
         fixer.findMissingResidues()
         fixer.findMissingAtoms()
         fixer.addMissingAtoms()
         fixer.addMissingHydrogens(7.0)
 
-        self.fixer = fixer
-        self.file = os.path.join(self.directory, os.path.basename(base) + f'_fixed{ext}')
+        self.Fixer = fixer
+        self.File = os.path.join(self.Directory, os.path.basename(base) + f'_fixed{ext}')
 
-        if self.write:
+        if self.Write:
             writer = PDBxFile if ext == '.cif' else PDBFile
-            with open(self.file, 'w') as fh:
+            with open(self.File, 'w') as fh:
                 writer.writeFile(fixer.topology, fixer.positions, fh)
-            logger.info(f"Wrote {self.file}")
+            logger.info(f"Wrote {self.File}")
 
-        logger.info(f"Fixed {self.pdbFile}. Missing residues: {fixer.missingResidues}")
+        logger.info(f"Fixed {self.PdbFile}. Missing residues: {fixer.missingResidues}")
 
     def setup(self):
-        '''Build modeller, forcefield, and minimization-ready system from self.fixer'''
-        self.modeller = Modeller(self.fixer.topology, self.fixer.positions)
-        self.forcefield = ForceField(self.mainForcefield, self.waterForcefield)
-        self.system = self.forcefield.createSystem(self.modeller.topology)
+        '''Build modeller, forcefield, and minimization-ready system from self.Fixer'''
+        self.Modeller = Modeller(self.Fixer.topology, self.Fixer.positions)
+        self.Forcefield = ForceField(self.MainForcefield, self.WaterForcefield)
+        self.System = self.Forcefield.createSystem(self.Modeller.topology)
 
     def minimize(self):
         '''Minimize the solute, then add a water box around the minimized positions'''
         logger.info("Minimizing solute..")
-        minimizer = Simulation(self.modeller.topology, self.system, self.integrator)
-        minimizer.context.setPositions(self.modeller.positions)
+        minimizer = Simulation(self.Modeller.topology, self.System, self.Integrator)
+        minimizer.context.setPositions(self.Modeller.positions)
         minimizer.minimizeEnergy()
-        self.modeller.positions = minimizer.context.getState(getPositions=True).getPositions()
+        self.Modeller.positions = minimizer.context.getState(getPositions=True).getPositions()
         logger.info("Solute minimized")
 
         logger.info("Adding water box..")
-        self.modeller.addSolvent(self.forcefield, padding=self.padding, boxShape=self.boxShape)
+        self.Modeller.addSolvent(self.Forcefield, padding=self.Padding, boxShape=self.BoxShape)
         logger.info("Water box added")
 
     def equilibrate(self):
         '''Build the production system (nonbondedMethod, constraints, barostat), minimize the
         solvated system, then equilibrate in two phases: NVT warm-up to
-        self.temperature, followed by NPT with the barostat enabled.'''
-        self.system = self.forcefield.createSystem(self.modeller.topology,
-                                                     nonbondedMethod=self.nonbondedMethod,
-                                                     nonbondedCutoff=self.nonbondedCutoff,
-                                                     constraints=self.constraints)
+        self.Temperature, followed by NPT with the barostat enabled.'''
+        self.System = self.Forcefield.createSystem(self.Modeller.topology,
+                                                     nonbondedMethod=self.NonbondedMethod,
+                                                     nonbondedCutoff=self.NonbondedCutoff,
+                                                     constraints=self.Constraints)
 
-        self.barostat = openmm.MonteCarloBarostat(self.pressure, self.temperature, 0)
-        self.system.addForce(self.barostat)
+        self.Barostat = openmm.MonteCarloBarostat(self.Pressure, self.Temperature, 0)
+        self.System.addForce(self.Barostat)
 
-        self.integrator = openmm.LangevinMiddleIntegrator(self.temperature, self.friction, self.stepsize)
-        self.simulation = Simulation(self.modeller.topology, self.system, self.integrator)
-        self.simulation.context.setPositions(self.modeller.positions)
+        self.Integrator = openmm.LangevinMiddleIntegrator(self.Temperature, self.Friction, self.Stepsize)
+        self.Simulation = Simulation(self.Modeller.topology, self.System, self.Integrator)
+        self.Simulation.context.setPositions(self.Modeller.positions)
 
         logger.info("Minimizing solvated system..")
-        self.simulation.minimizeEnergy()
-        state = self.simulation.context.getState(getEnergy=True, getPositions=True)
+        self.Simulation.minimizeEnergy()
+        state = self.Simulation.context.getState(getEnergy=True, getPositions=True)
         logger.info(f"Energy: {state.getPotentialEnergy()}")
 
         # Protein-only topology (solvent stripped), shared by both stripped
         # trajectories. Written once as model.pdb -- the topology for analysis.
-        self.subsetTopology, self.subsetIndices = self._proteinSubset()
-        subsetPositions = state.getPositions(asNumpy=True)[self.subsetIndices, :]
-        with open(self.model_pdb, 'w') as fh:
-            PDBFile.writeFile(self.subsetTopology, subsetPositions, fh)
+        self.SubsetTopology, self.SubsetIndices = self._proteinSubset()
+        subsetPositions = state.getPositions(asNumpy=True)[self.SubsetIndices, :]
+        with open(self.ModelPdb, 'w') as fh:
+            PDBFile.writeFile(self.SubsetTopology, subsetPositions, fh)
 
         # Persist the restart artifacts now that the production system exists:
         # the serialized System (forces + barostat), the FULL solvated topology
         # (restart needs every atom, unlike the stripped model.pdb), and the run
         # manifest. With the rolling state.xml written during production, these
         # let restart() rebuild the Simulation in a fresh process on any GPU/host.
-        with open(self.system_xml, 'w') as fh:
-            fh.write(openmm.XmlSerializer.serialize(self.system))
-        with open(self.solvated_pdb, 'w') as fh:
-            PDBFile.writeFile(self.modeller.topology, state.getPositions(asNumpy=True), fh)
+        with open(self.SystemXml, 'w') as fh:
+            fh.write(openmm.XmlSerializer.serialize(self.System))
+        with open(self.SolvatedPdb, 'w') as fh:
+            PDBFile.writeFile(self.Modeller.topology, state.getPositions(asNumpy=True), fh)
         self._writeParams()
 
-        if self.etimeNVT == 0 and self.etimeNPT == 0:
+        if self.EtimeNVT == 0 and self.EtimeNPT == 0:
             return
 
-        self.simulation.reporters.append(
-            StateDataReporter(self.einfo, reportInterval=50, step=True, temperature=True,
+        self.Simulation.reporters.append(
+            StateDataReporter(self.Einfo, reportInterval=50, step=True, temperature=True,
                               volume=True, potentialEnergy=True, speed=True))
-        self.simulation.reporters.append(
-            SubsetDCDReporter(self.etrajectory, 500, self.subsetTopology, self.subsetIndices))
+        self.Simulation.reporters.append(
+            SubsetDCDReporter(self.Etrajectory, 500, self.SubsetTopology, self.SubsetIndices))
 
-        stepsizeFs = self.stepsize.value_in_unit(femtoseconds)
+        stepsizeFs = self.Stepsize.value_in_unit(femtoseconds)
 
-        if self.etimeNVT > 0:
+        if self.EtimeNVT > 0:
             logger.info("First equilibration (NVT warm-up)..")
-            nIncrements = round(self.temperature.value_in_unit(kelvin) / self.estepNVT.value_in_unit(kelvin))
-            totalStepsNVT = round(self.etimeNVT * 1000 / stepsizeFs)
+            nIncrements = round(self.Temperature.value_in_unit(kelvin) / self.EstepNVT.value_in_unit(kelvin))
+            totalStepsNVT = round(self.EtimeNVT * 1000 / stepsizeFs)
             tsteps = totalStepsNVT // nIncrements
-            T = self.estepNVT
+            T = self.EstepNVT
             for i in range(nIncrements):
-                self.integrator.setTemperature(T)
-                self.simulation.step(tsteps)
-                T += self.estepNVT
+                self.Integrator.setTemperature(T)
+                self.Simulation.step(tsteps)
+                T += self.EstepNVT
 
-        if self.etimeNPT > 0:
+        if self.EtimeNPT > 0:
             # NPT runs in chunks until the smoothed potential energy plateaus
             # (relative drift < plateauTolerance). The full trace is written to
-            # self.eenergy. RECOMMENDED: inspect that equilibration curve before
+            # self.Eenergy. RECOMMENDED: inspect that equilibration curve before
             # launching production -- automated plateau detection is a heuristic,
             # not a guarantee. Stiff or slowly-relaxing systems may need a larger
             # plateauTolerance window (smaller value) or a longer etimeNPT per
             # chunk to avoid declaring convergence while still drifting.
             logger.info("Second equilibration (NPT, barostat enabled)..")
-            self.barostat.setFrequency(self.estepNPT)
+            self.Barostat.setFrequency(self.EstepNPT)
 
-            chunkSteps = round(self.etimeNPT * 1000 / stepsizeFs)
-            nSamples = max(chunkSteps // self.sampleInterval, 2)
-            sampleTimePs = self.sampleInterval * stepsizeFs / 1000  # ps between energy samples
-            window = max(1, min(round(self.smoothFraction * nSamples), nSamples))
+            chunkSteps = round(self.EtimeNPT * 1000 / stepsizeFs)
+            nSamples = max(chunkSteps // self.SampleInterval, 2)
+            sampleTimePs = self.SampleInterval * stepsizeFs / 1000  # ps between energy samples
+            window = max(1, min(round(self.SmoothFraction * nSamples), nSamples))
             kernel = np.ones(window) / window
             offset = (window - 1) // 2  # centering offset of the 'valid' moving average
 
-            with open(self.eenergy, 'w', newline='') as csvfile:
+            with open(self.Eenergy, 'w', newline='') as csvfile:
                 writer = csv.writer(csvfile)
                 writer.writerow(['time_ps', 'potential_energy_kJ_mol', 'smoothed_kJ_mol', 'chunk'])
 
                 elapsedPs = 0.0
                 converged = False
-                for chunk in range(self.maxEquilChunks):
+                for chunk in range(self.MaxEquilChunks):
                     # Sample the potential energy across one chunk of NPT.
                     times, energies = [], []
                     for _ in range(nSamples):
-                        self.simulation.step(self.sampleInterval)
+                        self.Simulation.step(self.SampleInterval)
                         elapsedPs += sampleTimePs
-                        e = self.simulation.context.getState(getEnergy=True).getPotentialEnergy()
+                        e = self.Simulation.context.getState(getEnergy=True).getPotentialEnergy()
                         times.append(elapsedPs)
                         energies.append(e.value_in_unit(kilojoules_per_mole))
 
@@ -312,21 +312,21 @@ class simulate:
                     logger.info(f"NPT chunk {chunk}: mean PE = {np.mean(smoothed):.2f} kJ/mol, "
                                 f"relative drift = {relativeDrift:.2e} /ps")
 
-                    if relativeDrift < self.plateauTolerance:
+                    if relativeDrift < self.PlateauTolerance:
                         logger.info("NPT equilibration converged (energy plateaued)")
                         converged = True
                         break
 
                 if not converged:
-                    logger.warning(f"NPT equilibration did not plateau within {self.maxEquilChunks} chunks")
+                    logger.warning(f"NPT equilibration did not plateau within {self.MaxEquilChunks} chunks")
 
     def _proteinSubset(self):
         '''Topology + original-topology atom indices for the non-solvent
         (protein/ligand) atoms, used to strip water/ions from the trajectory.'''
-        modeller = Modeller(self.modeller.topology, self.modeller.positions)
+        modeller = Modeller(self.Modeller.topology, self.Modeller.positions)
         solvent = [a for a in modeller.topology.atoms() if a.residue.name in SOLVENT_RESIDUES]
         modeller.delete(solvent)
-        indices = [a.index for a in self.modeller.topology.atoms()
+        indices = [a.index for a in self.Modeller.topology.atoms()
                    if a.residue.name not in SOLVENT_RESIDUES]
         return modeller.topology, indices
 
@@ -335,16 +335,16 @@ class simulate:
         needs that is NOT already captured by system.xml (the integrator config)
         or solvated.pdb (the topology): integrator parameters and run config.'''
         params = {
-            'pdbFile': self.pdbFile,
-            'stepsize_fs': self.stepsize.value_in_unit(femtoseconds),
-            'temperature_K': self.temperature.value_in_unit(kelvin),
-            'friction_per_ps': self.friction.value_in_unit(picosecond**-1),
-            'pressure_atm': self.pressure.value_in_unit(atmospheres),
-            'steps': self.steps,
-            'interval': self.interval,
-            'logInterval': self.logInterval,
+            'pdbFile': self.PdbFile,
+            'stepsize_fs': self.Stepsize.value_in_unit(femtoseconds),
+            'temperature_K': self.Temperature.value_in_unit(kelvin),
+            'friction_per_ps': self.Friction.value_in_unit(picosecond**-1),
+            'pressure_atm': self.Pressure.value_in_unit(atmospheres),
+            'steps': self.Steps,
+            'interval': self.Interval,
+            'logInterval': self.LogInterval,
         }
-        with open(self.params_json, 'w') as fh:
+        with open(self.ParamsJson, 'w') as fh:
             json.dump(params, fh, indent=2)
 
     def _resume(self, targetSteps, interval, logInterval, append):
@@ -355,39 +355,39 @@ class simulate:
         restart rather than dropping it -- a duplicate frame is preferred over a
         gap. Both fire every `interval` steps so the trajectory and state.xml
         stay in lockstep (their restart points can never diverge).'''
-        self.simulation.reporters = []
-        self.simulation.reporters.append(
-            StateDataReporter(self.info, reportInterval=logInterval, step=True, temperature=True,
+        self.Simulation.reporters = []
+        self.Simulation.reporters.append(
+            StateDataReporter(self.Info, reportInterval=logInterval, step=True, temperature=True,
                               volume=True, potentialEnergy=True, speed=True, append=append))
-        self.simulation.reporters.append(
-            SubsetDCDReporter(self.trajectory, interval, self.subsetTopology,
-                              self.subsetIndices, append=append))
-        self.simulation.reporters.append(StateXMLReporter(self.state_xml, interval))
+        self.Simulation.reporters.append(
+            SubsetDCDReporter(self.Trajectory, interval, self.SubsetTopology,
+                              self.SubsetIndices, append=append))
+        self.Simulation.reporters.append(StateXMLReporter(self.StateXml, interval))
 
-        remaining = targetSteps - self.simulation.currentStep
+        remaining = targetSteps - self.Simulation.currentStep
         if remaining <= 0:
             logger.info("Target step count already reached; nothing to run")
             return
         logger.info(f"Running production ({remaining} steps remaining)..")
-        self.simulation.step(remaining)
+        self.Simulation.step(remaining)
 
     def run(self):
-        '''Run the production simulation for self.steps timesteps.
+        '''Run the production simulation for self.Steps timesteps.
 
         The simulation itself runs in explicit solvent (water + ions); only the
         logging is solvent-stripped. The solvent is omitted from model.pdb and
         trajectory.dcd to save space -- every downstream analysis is protein-only.
         model.pdb (the trajectory's topology) is written in equilibrate().'''
-        self.simulation.currentStep = 0
+        self.Simulation.currentStep = 0
         # Reset the clock so state.xml's elapsed time measures PRODUCTION progress
         # (restart() derives the resume step from it; equilibration time must not
         # leak in).
-        self.simulation.context.setTime(0 * picosecond)
+        self.Simulation.context.setTime(0 * picosecond)
         # Write an initial restart point so even a crash within the first
         # `interval` can resume from production start.
-        self.simulation.saveState(self.state_xml)
+        self.Simulation.saveState(self.StateXml)
 
-        self._resume(self.steps, self.interval, self.logInterval, append=False)
+        self._resume(self.Steps, self.Interval, self.LogInterval, append=False)
 
     def _load(self):
         '''Rebuild the Simulation in a fresh process from the persisted run dir
@@ -397,56 +397,56 @@ class simulate:
         Resumes PRODUCTION ONLY: if state.xml is absent, equilibration never
         finished -- resubmit the initial job for this design (equilibration is
         cheap relative to production).'''
-        if not os.path.exists(self.state_xml):
+        if not os.path.exists(self.StateXml):
             raise FileNotFoundError(
-                f"No {self.state_xml}: production never started (equilibration "
+                f"No {self.StateXml}: production never started (equilibration "
                 f"did not finish). Resubmit the initial job for this design.")
 
-        with open(self.params_json) as fh:
+        with open(self.ParamsJson) as fh:
             p = json.load(fh)
 
-        pdb = PDBFile(self.solvated_pdb)
-        with open(self.system_xml) as fh:
-            self.system = openmm.XmlSerializer.deserialize(fh.read())
+        pdb = PDBFile(self.SolvatedPdb)
+        with open(self.SystemXml) as fh:
+            self.System = openmm.XmlSerializer.deserialize(fh.read())
 
         integrator = openmm.LangevinMiddleIntegrator(
             p['temperature_K'] * kelvin,
             p['friction_per_ps'] / picosecond,
             p['stepsize_fs'] * femtoseconds)
-        self.simulation = Simulation(pdb.topology, self.system, integrator)
-        self.simulation.loadState(self.state_xml)
+        self.Simulation = Simulation(pdb.topology, self.System, integrator)
+        self.Simulation.loadState(self.StateXml)
 
         # loadState restores the context clock but NOT simulation.currentStep, so
         # derive production progress from the elapsed time (reset to 0 in run()).
-        elapsedPs = self.simulation.context.getState().getTime().value_in_unit(picosecond)
-        self.simulation.currentStep = round(elapsedPs * 1000 / p['stepsize_fs'])
+        elapsedPs = self.Simulation.context.getState().getTime().value_in_unit(picosecond)
+        self.Simulation.currentStep = round(elapsedPs * 1000 / p['stepsize_fs'])
 
         # Re-derive the protein-only subset for the appending trajectory writer.
-        self.modeller = Modeller(pdb.topology, pdb.positions)
-        self.subsetTopology, self.subsetIndices = self._proteinSubset()
+        self.Modeller = Modeller(pdb.topology, pdb.positions)
+        self.SubsetTopology, self.SubsetIndices = self._proteinSubset()
         return p
 
     def restart(self):
-        '''Resume production in self.directory toward its existing step target,
+        '''Resume production in self.Directory toward its existing step target,
         from the last saved state.xml (saveState format -- portable GPU/host).'''
         p = self._load()
-        logger.info(f"Restarting at step {self.simulation.currentStep}; target {p['steps']}")
+        logger.info(f"Restarting at step {self.Simulation.currentStep}; target {p['steps']}")
         self._resume(p['steps'], p['interval'], p['logInterval'], append=True)
 
     def extend(self):
-        '''Continue a run toward a NEW, larger total step target (self.steps),
+        '''Continue a run toward a NEW, larger total step target (self.Steps),
         e.g. 100 ns -> 150 ns. The new target is persisted to params.json so
         subsequent restarts resume toward it. Same resume machinery as restart;
         only the target (and the manifest) change.'''
         p = self._load()
-        if self.steps <= p['steps']:
+        if self.Steps <= p['steps']:
             raise ValueError(
-                f"--extend target {self.steps} must exceed the current target "
+                f"--extend target {self.Steps} must exceed the current target "
                 f"{p['steps']}; pass a larger --steps")
 
-        p['steps'] = self.steps
-        with open(self.params_json, 'w') as fh:
+        p['steps'] = self.Steps
+        with open(self.ParamsJson, 'w') as fh:
             json.dump(p, fh, indent=2)
 
-        logger.info(f"Extending from step {self.simulation.currentStep} to {self.steps}")
-        self._resume(self.steps, p['interval'], p['logInterval'], append=True)
+        logger.info(f"Extending from step {self.Simulation.currentStep} to {self.Steps}")
+        self._resume(self.Steps, p['interval'], p['logInterval'], append=True)
