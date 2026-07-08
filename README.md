@@ -73,6 +73,9 @@ list and the [`Modeller.addSolvent`](http://docs.openmm.org/latest/api-python/ge
 and [`ForceField.createSystem`](http://docs.openmm.org/latest/api-python/generated/openmm.app.forcefield.ForceField.html#openmm.app.forcefield.ForceField.createSystem)
 API docs.
 
+Each attribute is stored as the parameter input with a capital first letter (e.g.
+`s.Directory`, `s.PdbFile`).
+
 | Parameter | Default | Meaning |
 |---|---|---|
 | `directory` | *(required)* | Run directory; all artifacts are written here. |
@@ -143,7 +146,11 @@ binding score in `a.BindingScore`). They fall into four groups:
   within 8 Å, repulsion within 13 Å). In a single pass it accumulates the score as a
   cumulative function of time — `a.BindingSeries` (with `a.AttractionSeries` /
   `a.RepulsionSeries`) against `a.BindingTime` — and the full-trajectory scalar
-  `a.BindingScore` is just the last point of that curve.
+  `a.BindingScore` is just the last point of that curve. Pass `startFrame` (a frame
+  index, or `"min"` to auto-detect the end of the docking-relaxation transient at the
+  cumulative minimum) to compute the correlation over only the equilibrated window;
+  `a.ResCorStartFrame` records the window used and `a.ResCorFlagged` marks designs
+  whose interface never stabilized.
 
 Binding analyses take the two chain IDs to compare, e.g. `a.resCor("A", "B")`
 (receptor = A, nanobody = B).
@@ -172,7 +179,7 @@ Every tunable value in a method is a keyword argument:
 | `clusterUmap` | `min_cluster_size=500`, `min_samples=1`, `cluster_selection_epsilon=0.01` |
 | `contacts` | `chain0`, `chain1`, `cutoff=4.5`, `method="radius_cut"` |
 | `dist` / `contacts2` | `chain0`, `chain1`, `cutoff=4.5` |
-| `resCor` | `chain0`, `chain1`, `attractiveCutoff=8`, `repulsiveCutoff=13`, `stride=1`, `minFrames=10` |
+| `resCor` | `chain0`, `chain1`, `attractiveCutoff=8`, `repulsiveCutoff=13`, `stride=1`, `minFrames=10`, `startFrame=0` |
 
 `all(chain0=None, chain1=None)` runs the whole suite in dependency order; pass the two
 chain IDs to include the binding analyses. (`T` in Kelvin, `kB` in J/K.)
@@ -193,7 +200,7 @@ skipping the ones not yet run. `write=True` saves `{outputName}{kind}.png`. Vali
 | `umap` | `umap()` (+ `clusterUmap()`) | UMAP embedding, colored by cluster |
 | `contacts` | `contacts()` | native-contact fraction over time |
 | `distance` / `contactFreq` | `dist()` / `contacts2()` | inter-chain distance / contact-frequency map |
-| `resCor` | `resCor()` | inter-chain Cα correlation matrix |
+| `resCor` | `resCor()` | inter-chain Cα correlation matrix (condensed to interacting residues; `plot("resCor", view="all")` for the full matrix) |
 | `bindingScore` | `resCor()` | attraction/repulsion/binding score vs time |
 
 ## Command line

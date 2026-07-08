@@ -86,6 +86,10 @@ class analyze:
         self.FilteredDistance = None
         self.ContactFreq = None
         self.ResCor = None
+        self.ResCorRowIds = None
+        self.ResCorColIds = None
+        self.ResCorStartFrame = None
+        self.ResCorFlagged = False
         self.AttractionScore = None
         self.RepulsionScore = None
         self.BindingScore = None
@@ -362,31 +366,14 @@ class analyze:
         self.ContactFreq = contactA / len(self.U.trajectory)
         return self
 
-    # https://pubs.acs.org/doi/10.1021/acs.jcim.5c01725#fig1
-    def resCor(self, chain0, chain1, attractiveCutoff=8, repulsiveCutoff=13,
-                   stride=1, minFrames=10):
-        '''Normalized inter-chain CA displacement correlation, the binding score,
-        as a cumulative function of time.
-
-        One pass over the trajectory accumulates running sums, so the score computed
-        from frames [0..t] is evaluated at every `stride`-th frame (once n >= minFrames;
-        the last frame is always evaluated). The close-contact correlation matrix
-        (self.ResCor): positive (attractive) correlations kept within attractiveCutoff A,
-        negative (repulsive) within repulsiveCutoff A.
-
-        Stores the cumulative curves self.BindingSeries/AttractionSeries/RepulsionSeries
-        against self.BindingTime (ps), and the final full-trajectory scalars
-        self.BindingScore/AttractionScore/RepulsionScore (== each curve's last value)
-        plus self.ResCor (the final masked matrix).
-
-        Uses RAW positions (the trajectory must be unwrapped); per-molecule wrapping
-        would teleport a chain across the box and corrupt the correlation.'''
-        logger.info("Finding inter-chain residue correlation over time..")
-        caA = self._group(chain0).select_atoms("name CA")
-        caB = self._group(chain1).select_atoms("name CA")
-
+    def _accumulateResCor(self, caA, caB, startFrame, stride, minFrames,
+                          attractiveCutoff, repulsiveCutoff, last):
+        '''Single-pass accumulation of the inter-chain CA correlation over frames
+        [startFrame..last], evaluated at every stride-th frame once the accumulated
+        count >= minFrames (the last frame is always evaluated). Returns
+        (frames, times, attrS, repS, bindS, cutoffM): the cumulative curves with the
+        frame index and time of each evaluated point, and the final masked matrix.'''
         nB, nA = len(caB), len(caA)
-        last = len(self.U.trajectory) - 1
 
         # Running sums: cov = E[XY] - E[X]E[Y]; var = E[X^2] - E[X]^2 (one pass)
         SB = np.zeros((nB, 3))
@@ -395,11 +382,13 @@ class analyze:
         SsqA = np.zeros(nA)
         SO = np.zeros((nB, nA))
 
-        times, bindS, attrS, repS = [], [], [], []
+        frames, times, bindS, attrS, repS = [], [], [], [], []
         cutoffM = np.zeros((nB, nA))   # holds the most recent (-> final) masked matrix
 
-        start = time.perf_counter()
+        t0 = time.perf_counter()
         for k, ts in enumerate(self.U.trajectory):
+            if k < startFrame:   # ignore the leading transient entirely
+                continue
             posB, posA = caB.positions, caA.positions
             SB += posB
             SA += posA
@@ -407,8 +396,8 @@ class analyze:
             SsqA += np.sum(posA ** 2, axis=1)
             SO += posB @ posA.T
 
-            n = k + 1
-            if k != last and (n < minFrames or k % stride != 0):
+            n = k - startFrame + 1
+            if k != last and (n < minFrames or (k - startFrame) % stride != 0):
                 continue
 
             mB, mA = SB / n, SA / n
@@ -425,19 +414,84 @@ class analyze:
             cutoffM[(norm > 0) & (avgD <= attractiveCutoff)] = norm[(norm > 0) & (avgD <= attractiveCutoff)]
             cutoffM[(norm < 0) & (avgD <= repulsiveCutoff)] = norm[(norm < 0) & (avgD <= repulsiveCutoff)]
 
+            frames.append(k)
             times.append(ts.time)
             attrS.append(np.sum(cutoffM[cutoffM > 0]))
             repS.append(np.sum(cutoffM[cutoffM < 0]))
             bindS.append(np.sum(cutoffM))
-        logger.info("Finished correlation in %.2f seconds", time.perf_counter() - start)
+        logger.info("Accumulated correlation [%d..%d] in %.2f seconds",
+                    startFrame, last, time.perf_counter() - t0)
+        return frames, times, attrS, repS, bindS, cutoffM
+
+    # https://pubs.acs.org/doi/10.1021/acs.jcim.5c01725#fig1
+    def resCor(self, chain0, chain1, attractiveCutoff=8, repulsiveCutoff=13,
+                   stride=1, minFrames=10, startFrame=0):
+        '''Normalized inter-chain CA displacement correlation, the binding score,
+        as a cumulative function of time.
+
+        One pass over the trajectory accumulates running sums, so the score computed
+        from frames [startFrame..t] is evaluated at every `stride`-th frame (once the
+        accumulated count >= minFrames; the last frame is always evaluated). startFrame
+        drops the leading frames from the accumulation -- use it to discard the
+        docking-relaxation transient so the correlation reflects the equilibrated
+        interface (frames before startFrame are ignored entirely, not just in plotting).
+        startFrame may be an int frame index, or "min" to auto-detect it as the frame
+        of the cumulative binding minimum (peak accumulated repulsion = end of the
+        docking transient). Guard: if that minimum falls beyond 40% of the trajectory
+        the interface never stabilized, so the design is not trimmed and self.ResCorFlagged
+        is set True for downstream filtering. "min" costs a second pass over the trajectory.
+
+        The close-contact correlation matrix (self.ResCor): positive (attractive)
+        correlations kept within attractiveCutoff A, negative (repulsive) within
+        repulsiveCutoff A.
+
+        Stores the cumulative curves self.BindingSeries/AttractionSeries/RepulsionSeries
+        against self.BindingTime (ps), the final scalars self.BindingScore/AttractionScore/
+        RepulsionScore (== each curve's last value), self.ResCor (the final masked matrix),
+        and self.ResCorStartFrame/ResCorFlagged (the window used and the guard flag).
+
+        Uses RAW positions (the trajectory must be unwrapped); per-molecule wrapping
+        would teleport a chain across the box and corrupt the correlation.'''
+        logger.info("Finding inter-chain residue correlation over time..")
+        caA = self._group(chain0).select_atoms("name CA")
+        caB = self._group(chain1).select_atoms("name CA")
+        last = len(self.U.trajectory) - 1
+
+        if startFrame == "min":
+            # First pass over the whole trajectory to locate the cumulative minimum
+            # (peak accumulated repulsion == end of the docking transient).
+            frames, times, attrS, repS, bindS, cutoffM = self._accumulateResCor(
+                caA, caB, 0, stride, minFrames, attractiveCutoff, repulsiveCutoff, last)
+            minFrame = int(frames[int(np.argmin(bindS))])
+            flagged = minFrame > 0.4 * (last + 1)
+            if flagged:
+                logger.warning("resCor: binding minimum at frame %d (> 40%% of %d frames); "
+                               "interface never stabilized -- not trimming, flagging design",
+                               minFrame, last + 1)
+                startFrame = 0
+            else:
+                startFrame = minFrame
+            if startFrame > 0:   # re-accumulate over the equilibrated window for the stored result
+                frames, times, attrS, repS, bindS, cutoffM = self._accumulateResCor(
+                    caA, caB, startFrame, stride, minFrames, attractiveCutoff, repulsiveCutoff, last)
+        else:
+            if not 0 <= startFrame <= last:
+                raise ValueError(f"startFrame {startFrame} out of range [0, {last}]")
+            flagged = False
+            frames, times, attrS, repS, bindS, cutoffM = self._accumulateResCor(
+                caA, caB, startFrame, stride, minFrames, attractiveCutoff, repulsiveCutoff, last)
 
         self.BindingTime = np.array(times)
         self.AttractionSeries = np.array(attrS)
         self.RepulsionSeries = np.array(repS)
         self.BindingSeries = np.array(bindS)
 
-        # Final full-trajectory values == last point of each curve
+        # Final values == last point of each curve (over the [startFrame..] window)
         self.ResCor = cutoffM
+        self.ResCorRowIds = caB.resids   # chain1 (rows) residue numbers, for condensed axes
+        self.ResCorColIds = caA.resids   # chain0 (cols) residue numbers
+        self.ResCorStartFrame = startFrame
+        self.ResCorFlagged = flagged
         self.AttractionScore = self.AttractionSeries[-1]
         self.RepulsionScore = self.RepulsionSeries[-1]
         self.BindingScore = self.BindingSeries[-1]
@@ -540,12 +594,31 @@ class analyze:
         return self._heatmap(self.ContactFreq, "Contact frequency",
                              "chain0 residue", "chain1 residue", "magma", "Contact frequency")
 
-    def _plotResCor(self):
+    def _plotResCor(self, view="condensed"):
+        '''view="condensed" (default) drops all-zero rows/columns so only residues
+        that carry a retained correlation are shown, enlarging the interacting
+        residues; axes are then labelled by residue number (no longer continuous).
+        view="all" keeps the full contiguous matrix.'''
         self._require(self.ResCor, "resCor()")
-        vmax = np.abs(self.ResCor).max() or 1
-        return self._heatmap(self.ResCor, "Inter-chain CA correlation",
-                             "chain0 residue", "chain1 residue", "bwr", "Correlation",
-                             vmin=-vmax, vmax=vmax)
+        mat, rowIds, colIds = self.ResCor, self.ResCorRowIds, self.ResCorColIds
+        if view == "condensed":
+            rows = np.flatnonzero(np.any(mat != 0, axis=1))
+            cols = np.flatnonzero(np.any(mat != 0, axis=0))
+            mat = mat[np.ix_(rows, cols)]
+            rowIds, colIds = rowIds[rows], colIds[cols]
+        elif view != "all":
+            raise ValueError(f"view must be 'condensed' or 'all', got {view!r}")
+
+        if mat.size == 0:   # no residue pair kept a correlation (e.g. a non-interacting design)
+            logger.warning("resCor: no correlations retained; nothing to condense")
+        vmax = (np.abs(mat).max() if mat.size else 1) or 1
+        fig, ax = self._heatmap(mat, "Inter-chain CA correlation",
+                                "chain0 residue", "chain1 residue", "bwr", "Correlation",
+                                vmin=-vmax, vmax=vmax)
+        if view == "condensed":   # label the now non-contiguous axes by residue number
+            ax.set_xticks(np.arange(len(colIds)), colIds, rotation=90)
+            ax.set_yticks(np.arange(len(rowIds)), rowIds)
+        return fig, ax
 
     def _plotBindingScore(self):
         self._require(self.BindingSeries, "resCor()")
@@ -560,12 +633,13 @@ class analyze:
         ax.legend()
         return fig, ax
 
-    def plot(self, kind, write=False, show=True):
+    def plot(self, kind, write=False, show=True, **kwargs):
         '''Render a stored result: display it (show=True) and/or write
         {outputName}{kind}.png (write=True); returns (fig, ax). Plotting is
         deliberately separate from the analysis methods (results live on self), so
         the matching method must have run first -- otherwise the error names it.
-        Valid kinds are the keys below.'''
+        Valid kinds are the keys below. Extra kwargs pass to the plotter, e.g.
+        plot("resCor", view="all").'''
         plotters = {
             "rmsd": self._plotRmsd,
             "rmsf": self._plotRmsf,
@@ -580,7 +654,7 @@ class analyze:
         }
         if kind not in plotters:
             raise ValueError(f"Unknown plot {kind!r}; choose from {list(plotters)}")
-        fig, ax = plotters[kind]()
+        fig, ax = plotters[kind](**kwargs)
         if write:
             fname = f"{self.OutputName}{kind}.png"
             fig.savefig(fname, dpi=150, bbox_inches="tight")
