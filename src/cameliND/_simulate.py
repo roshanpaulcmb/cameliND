@@ -28,6 +28,18 @@ logger = logging.getLogger(__name__)
 SOLVENT_RESIDUES = {'HOH', 'WAT', 'TIP3', 'TIP4', 'SPC',
                     'NA', 'CL', 'K', 'MG', 'ZN', 'CA', 'LI', 'CS', 'RB', 'BR'}
 
+
+def _cudaPlatform():
+    '''Return the CUDA platform, raising if it is unavailable.
+
+    Pinned explicitly: left to auto-select, OpenMM silently falls back to the CPU
+    platform when a CUDA context cannot be initialized, which turns a dead GPU into
+    a run that crawls for hours and then dies mid-equilibration instead of failing
+    here. This protocol is GPU-only, so no CUDA is an error, not a slow path.'''
+    platform = openmm.Platform.getPlatformByName('CUDA')
+    logger.info(f"Using OpenMM platform: {platform.getName()}")
+    return platform
+
 #### CLASS ####
 
 class simulate:
@@ -187,7 +199,8 @@ class simulate:
     def minimize(self):
         '''Minimize the solute, then add a water box around the minimized positions'''
         logger.info("Minimizing solute..")
-        minimizer = Simulation(self.Modeller.topology, self.System, self.Integrator)
+        minimizer = Simulation(self.Modeller.topology, self.System, self.Integrator,
+                               platform=_cudaPlatform())
         minimizer.context.setPositions(self.Modeller.positions)
         minimizer.minimizeEnergy()
         self.Modeller.positions = minimizer.context.getState(getPositions=True).getPositions()
@@ -210,7 +223,8 @@ class simulate:
         self.System.addForce(self.Barostat)
 
         self.Integrator = openmm.LangevinMiddleIntegrator(self.Temperature, self.Friction, self.Stepsize)
-        self.Simulation = Simulation(self.Modeller.topology, self.System, self.Integrator)
+        self.Simulation = Simulation(self.Modeller.topology, self.System, self.Integrator,
+                                     platform=_cudaPlatform())
         self.Simulation.context.setPositions(self.Modeller.positions)
 
         logger.info("Minimizing solvated system..")
@@ -413,7 +427,8 @@ class simulate:
             p['temperature_K'] * kelvin,
             p['friction_per_ps'] / picosecond,
             p['stepsize_fs'] * femtoseconds)
-        self.Simulation = Simulation(pdb.topology, self.System, integrator)
+        self.Simulation = Simulation(pdb.topology, self.System, integrator,
+                                     platform=_cudaPlatform())
         self.Simulation.loadState(self.StateXml)
 
         # loadState restores the context clock but NOT simulation.currentStep, so

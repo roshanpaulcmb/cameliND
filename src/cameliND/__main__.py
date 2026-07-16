@@ -86,7 +86,7 @@ def main(argv=None):
     sim.minimize()
     sim.equilibrate()
 
-    if sim.etimeNVT > 0 or sim.etimeNPT > 0:
+    if sim.EtimeNVT > 0 or sim.EtimeNPT > 0:
         sim.run()
 
 
